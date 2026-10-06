@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Lock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #000;
+    font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif; color: #fff;
+    user-select: none; cursor: default; }
+
+  /* ===== 锁屏 ===== */
+  #bg { position: fixed; inset: 0; background: url("assets/bg.jpg") center/cover no-repeat, #1b2a41; }
+  #bg::after { content: ""; position: absolute; inset: 0; background: rgba(0,0,0,.25); }
+  #clockScreen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    padding-top: 12vh; transition: transform .45s ease, opacity .45s ease; }
+  #clockScreen.hide { transform: translateY(-100%); opacity: 0; pointer-events: none; }
+  #time { font-size: 8.5rem; font-weight: 600; line-height: 1; text-shadow: 0 2px 12px rgba(0,0,0,.4); }
+  #date { font-size: 2rem; margin-top: .6rem; text-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  #login { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; opacity: 0; pointer-events: none; transition: opacity .4s ease;
+    backdrop-filter: blur(30px) brightness(.7); }
+  #login.show { opacity: 1; pointer-events: auto; }
+  .avatar { width: 200px; height: 200px; border-radius: 50%; background: #d9d9d9 url("assets/avatar.png") center/cover;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 20px rgba(0,0,0,.4); overflow: hidden; }
+  .avatar svg { width: 120px; height: 120px; fill: #8a8a8a; }
+  #username { font-size: 2rem; font-weight: 600; margin: 1.2rem 0 1.4rem; }
+  .pwbox { position: relative; width: 320px; }
+  #pw { width: 100%; height: 40px; padding: 0 44px 0 12px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,.5); border-bottom: 2px solid #60cdff;
+    background: rgba(30,30,30,.7); color: #fff; font-size: 1rem; outline: none; }
+  #pw::placeholder { color: #bdbdbd; }
+  #go { position: absolute; right: 4px; top: 4px; width: 32px; height: 32px; border: 0; border-radius: 4px;
+    background: transparent; color: #fff; font-size: 1.1rem; cursor: pointer; }
+  #go:hover { background: rgba(255,255,255,.15); }
+  #hint { margin-top: 1rem; font-size: .8rem; color: #ddd; }
+  #errBox { display: none; flex-direction: column; align-items: center; }
+  #errBox.show { display: flex; }
+  #errBox p { font-size: 1rem; margin-bottom: 1.2rem; text-align: center; }
+  #errBox button { min-width: 100px; height: 34px; border: 1px solid rgba(255,255,255,.4); border-radius: 4px;
+    background: rgba(255,255,255,.2); color: #fff; font-size: .95rem; cursor: pointer; }
+  #errBox button:hover { background: rgba(255,255,255,.3); }
+  #pwArea.hidden { display: none; }
+  #corner { position: fixed; right: 28px; bottom: 24px; display: flex; gap: 22px; font-size: 1.3rem; opacity: .9; }
+  #loading { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.55); backdrop-filter: blur(30px); z-index: 5; }
+  #loading.show { display: flex; }
+  .spinner { width: 42px; height: 42px; border: 4px solid rgba(255,255,255,.25); border-top-color: #fff;
+    border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 1.2rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #scare { position: fixed; inset: 0; z-index: 10; background: #000; display: none; }
+  #scare.show { display: block; }
+  #scare video { width: 100%; height: 100%; object-fit: cover; }
+
+  /* ===== 假桌面 ===== */
+  #desktop { position: fixed; inset: 0; z-index: 20; display: none; overflow: hidden;
+    background: url("assets/desktop.jpg") center/cover no-repeat, url("assets/bg.jpg") center/cover no-repeat, #0f3a5f; }
+  #desktop.show { display: block; animation: fadein .8s ease; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  #icons { position: absolute; top: 12px; left: 12px; bottom: 56px; display: flex; flex-direction: column;
+    flex-wrap: wrap; align-content: flex-start; gap: 6px; }
+  .icon { width: 88px; padding: 8px 4px; text-align: center; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }
+  .icon:hover { background: rgba(255,255,255,.15); border-color: rgba(255,255,255,.25); }
+  .icon .ico { font-size: 2.6rem; line-height: 1.2; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+  .icon .nm { font-size: .78rem; margin-top: 4px; text-shadow: 0 1px 3px #000; word-break: break-all; }
+
+  #taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 48px; display: flex; align-items: center;
+    justify-content: space-between; background: rgba(32,32,32,.85); backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255,255,255,.1); z-index: 9999; padding: 0 12px; }
+  #tbLeft { display: flex; align-items: center; gap: 6px; flex: 1; justify-content: center; margin-left: 120px; }
+  .tbBtn { height: 38px; min-width: 38px; padding: 0 12px; border-radius: 6px; display: flex; align-items: center; gap: 6px;
+    font-size: .8rem; cursor: pointer; background: transparent; border: 0; color: #fff; max-width: 160px; overflow: hidden; white-space: nowrap; }
+  .tbBtn:hover { background: rgba(255,255,255,.12); }
+  .tbBtn.active { background: rgba(255,255,255,.18); border-bottom: 2px solid #60cdff; }
+  #tbClock { text-align: right; font-size: .75rem; line-height: 1.3; width: 120px; }
+
+  .win { position: absolute; background: #2b2b2b; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.55);
+    border: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; overflow: hidden; }
+  .win.min { display: none; }
+  .wtitle { height: 36px; display: flex; align-items: center; justify-content: space-between;
+    background: #202020; padding-left: 12px; font-size: .82rem; cursor: move; flex: none; }
+  .wtitle .wbtns { display: flex; height: 100%; }
+  .wtitle .wbtns span { width: 46px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: .9rem; }
+  .wtitle .wbtns span:hover { background: rgba(255,255,255,.12); }
+  .wtitle .wbtns .wx:hover { background: #c42b1c; }
+  .wbody { flex: 1; overflow: auto; min-height: 0; }
+  .wbody.text { background: #fff; color: #111; padding: 14px 16px; font-size: .95rem; line-height: 1.7; white-space: pre-wrap; user-select: text; }
+  .wbody.media { background: #000; display: flex; align-items: center; justify-content: center; }
+  .wbody.media img, .wbody.media video { max-width: 100%; max-height: 100%; }
+  .wbody.folder { padding: 10px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; background: #2b2b2b; }
+  .wbody.ask { padding: 20px; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; background: #2b2b2b; }
+  .wbody.ask input { width: 100%; height: 36px; padding: 0 10px; border-radius: 6px; border: 1px solid #777; border-bottom: 2px solid #60cdff;
+    background: #1c1c1c; color: #fff; outline: none; user-select: text; }
+  .wbody.ask button { height: 32px; min-width: 90px; border-radius: 4px; border: 0; background: #60cdff; color: #000; cursor: pointer; }
+  .wbody.ask .msg { font-size: .85rem; color: #ff8a80; min-height: 1.2em; }
+
+
+  /* ===== 手机横屏体验 ===== */
+  #rotateOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: #050505;
+    color: #fff;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    padding: 28px;
+  }
+  #rotateOverlay .rotateIcon {
+    font-size: clamp(3.5rem, 18vw, 6rem);
+    line-height: 1;
+    margin-bottom: 24px;
+    animation: rotateHint 1.8s ease-in-out infinite;
+  }
+  #rotateOverlay .rotateTitle {
+    font-size: clamp(1.25rem, 5vw, 1.8rem);
+    font-weight: 700;
+    letter-spacing: .08em;
+  }
+  #rotateOverlay .rotateText {
+    margin-top: 10px;
+    color: #bbb;
+    font-size: clamp(.85rem, 3.5vw, 1rem);
+  }
+  @keyframes rotateHint {
+    0%, 100% { transform: rotate(0deg); }
+    45%, 70% { transform: rotate(-90deg); }
+  }
+
+  @media (max-width: 700px) and (orientation: portrait) {
+    #rotateOverlay { display: flex; }
+    body { width: 100vw; height: 100dvh; }
+  }
+
+  @media (max-width: 700px) and (orientation: landscape) {
+    #rotateOverlay { display: none; }
+  }
+
+  @media (max-width: 700px) {
+    #scare video {
+      width: 100vw;
+      height: 100dvh;
+      object-fit: contain;
+      background: #000;
+    }
+
+    #desktop {
+      width: 100vw;
+      height: 100dvh;
+    }
+
+    #icons {
+      top: 8px;
+      left: 8px;
+      bottom: 50px;
+      gap: 4px;
+    }
+
+    #taskbar {
+      height: 44px;
+      padding: 0 5px;
+    }
+
+    #tbClock {
+      width: 86px;
+    }
+
+    .win {
+      max-width: calc(100vw - 16px);
+      max-height: calc(100dvh - 54px);
+    }
+  }
+
+  /* ===== 手机 / 平板适配 ===== */
+  @media (max-width: 700px) {
+    #clockScreen { padding-top: 16vh; }
+    #time { font-size: clamp(4.2rem, 18vw, 7rem); }
+    #date { font-size: 1.15rem; }
+    .avatar { width: 120px; height: 120px; }
+    .avatar svg { width: 72px; height: 72px; }
+    #username { font-size: 1.45rem; margin: .9rem 0 1rem; }
+    .pwbox { width: min(82vw, 320px); }
+    #corner { right: 16px; bottom: 16px; font-size: 1rem; gap: 14px; }
+    #taskbar { height: 46px; padding: 0 6px; }
+    #tbLeft { margin-left: 0; justify-content: center; }
+    #tbClock { width: 92px; font-size: .65rem; }
+    .icon { width: 72px; }
+    .icon .ico { font-size: 2.1rem; }
+    .icon .nm { font-size: .68rem; }
+    .win { border-radius: 6px; }
+    .wtitle { height: 34px; }
+    #scare video { object-fit: cover; }
+  }
+  @media (orientation: landscape) and (max-height: 500px) {
+    #clockScreen { padding-top: 8vh; }
+    #time { font-size: 4.8rem; }
+    #date { font-size: 1rem; }
+    .avatar { width: 90px; height: 90px; }
+    #username { margin: .4rem 0; }
+  }
+
+</style>
+</head>
+<body>
+
+<div id="rotateOverlay" aria-hidden="true">
+  <div class="rotateIcon">↻</div>
+  <div class="rotateTitle">请将手机横向</div>
+  <div class="rotateText">请旋转手机至横屏后继续</div>
+</div>
+
+<div id="bg"></div>
+<div id="clockScreen"><div id="time">00:00</div><div id="date"></div></div>
+
+<div id="login">
+  <div class="avatar"><svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z"/></svg></div>
+  <div id="username">User</div>
+  <div id="pwArea">
+    <div class="pwbox">
+      <input id="pw" type="password" placeholder="密码" autocomplete="off" spellcheck="false">
+      <button id="go" title="提交">→</button>
+    </div>
+    <div id="hint">我忘记了我的密码</div>
+  </div>
+  <div id="errBox"><p>密码不正确。请重试。</p><button id="errOk">确定</button></div>
+</div>
+<div id="corner"><span>📶</span><span>♿</span><span>⏻</span></div>
+<div id="loading"><div class="spinner"></div><div>欢迎</div></div>
+<div id="scare"><video id="vid" src="assets/jumpscare.mp4" playsinline webkit-playsinline preload="auto" disablepictureinpicture></video></div>
+
+<div id="desktop">
+  <div id="icons"></div>
+  <div id="taskbar">
+    <div style="width:120px"></div>
+    <div id="tbLeft"><button class="tbBtn" style="font-size:1.3rem">⊞</button></div>
+    <div id="tbClock"></div>
+  </div>
+</div>
+
+<script>
+  // =====================================================
+  //                       设置区
+  // =====================================================
+  const PASSWORD  = "123456789";   // 锁屏密码
+  const USER_NAME = "User";        // 登录页用户名
+  const STAFF_KEY = "F9";          // 工作人员紧急退出键
+  const OPEN_WITH_SINGLE_CLICK = true;   // true=单击打开, false=双击打开
+
+  // 桌面上的文件。type: text / image / video / folder
+  // 想加密码就加 password:"xxxx"。文件放在 assets/files/ 里。
+  const DESKTOP = [
+    { name: "日记.txt", type: "text",
+      content: "这里写文字内容……\n\n可以换行，随便写线索。" },
+    { name: "照片.jpg", type: "image", src: "assets/files/photo.jpg" },
+    { name: "录像.mp4", type: "video", src: "assets/files/video1.mp4" },
+    { name: "资料", type: "folder", children: [
+        { name: "笔记.txt", type: "text", content: "文件夹里面的文字文件。" },
+        { name: "监控.mp4", type: "video", src: "assets/files/video2.mp4" },
+        { name: "现场.jpg", type: "image", src: "assets/files/photo2.jpg" },
+    ]},
+    { name: "加密文件.txt", type: "text", password: "1234",
+      content: "只有输入正确密码才会看到这里。" },
+  ];
+  // =====================================================
+
+  const $ = id => document.getElementById(id);
+  $("username").textContent = USER_NAME;
+
+  // ---------- 时钟 ----------
+  function tick() {
+    const d = new Date();
+    const t = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const dt = d.toLocaleDateString("zh-CN", { year: "numeric", month: "numeric", day: "numeric" });
+    $("time").textContent = t;
+    $("date").textContent = d.toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" });
+    $("tbClock").innerHTML = t + "<br>" + dt;
+  }
+  tick(); setInterval(tick, 1000);
+
+  // ---------- 锁屏 ----------
+  let loginOpen = false, inDesktop = false;
+  function openLogin() {
+    if (loginOpen) return;
+    loginOpen = true;
+    $("clockScreen").classList.add("hide");
+    $("login").classList.add("show");
+    setTimeout(() => $("pw").focus(), 300);
+  }
+  document.addEventListener("click", openLogin);
+  document.addEventListener("keydown", e => { if (e.key !== STAFF_KEY) openLogin(); });
+
+  function submit() {
+    if ($("pw").value === PASSWORD) {
+      // 直接在密码提交这个用户手势里启动视频，兼容手机浏览器的播放限制。
+      $("loading").classList.add("show");
+      playScare();
+    } else {
+      $("pwArea").classList.add("hidden");
+      $("errBox").classList.add("show");
+      $("errOk").focus();
+    }
+  }
+  $("go").addEventListener("click", e => { e.stopPropagation(); submit(); });
+  $("pw").addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+  $("errOk").addEventListener("click", e => {
+    e.stopPropagation();
+    $("errBox").classList.remove("show");
+    $("pwArea").classList.remove("hidden");
+    $("pw").value = ""; $("pw").focus();
+  });
+  document.addEventListener("keydown", e => {
+    if ($("errBox").classList.contains("show") && (e.key === "Enter" || e.key === " ")) $("errOk").click();
+  });
+
+  // ---------- Jumpscare -> 假桌面 ----------
+  let scareDone = false;
+  let scareAudioStarted = false;
+  let scareWatchdog = null;
+
+  async function tryFullscreen() {
+    const el = $("scare");
+    try {
+      // Fullscreen must be requested from the password-submit gesture when possible.
+      if (el.requestFullscreen) {
+        const p = el.requestFullscreen({ navigationUI: "hide" });
+        if (p && p.catch) await p.catch(() => {});
+      }
+    } catch (_) {}
+
+    // Android browsers may allow orientation locking only after fullscreen.
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        await screen.orientation.lock("landscape").catch(() => {});
+      }
+    } catch (_) {}
+  }
+
+  function enforceScareAudio() {
+    const v = $("vid");
+    if (!v) return;
+
+    // 0–5 秒保持静音；5 秒后把 HTML media volume 拉到最大并解除 muted。
+    if (v.currentTime < 5) {
+      v.muted = true;
+      v.volume = 0;
+      scareAudioStarted = false;
+      return;
+    }
+
+    if (!scareAudioStarted) {
+      scareAudioStarted = true;
+      v.volume = 1;
+      v.muted = false;
+
+      // Some mobile browsers allow the property change but delay the actual
+      // audio state. Re-apply it immediately a few times without restarting video.
+      let tries = 0;
+      const boost = setInterval(() => {
+        tries++;
+        try {
+          v.volume = 1;
+          v.muted = false;
+        } catch (_) {}
+        if (tries >= 10 || v.ended) clearInterval(boost);
+      }, 100);
+    } else {
+      try {
+        v.volume = 1;
+        v.muted = false;
+      } catch (_) {}
+    }
+  }
+
+  function updateOrientationUI() {
+    const overlay = $("rotateOverlay");
+    if (!overlay) return;
+    const portraitPhone = window.matchMedia("(max-width: 700px) and (orientation: portrait)").matches;
+    overlay.style.display = portraitPhone ? "flex" : "none";
+  }
+
+  window.addEventListener("resize", updateOrientationUI);
+  window.addEventListener("orientationchange", () => {
+    setTimeout(updateOrientationUI, 100);
+  });
+  updateOrientationUI();
+
+  function playScare() {
+    $("loading").classList.remove("show");
+    $("scare").classList.add("show");
+
+    const v = $("vid");
+    scareDone = false;
+    scareAudioStarted = false;
+    v.currentTime = 0;
+    v.muted = true;
+    v.volume = 0;
+
+    // 在密码提交这个用户手势中同时尝试全屏/横屏和播放。
+    // 浏览器不支持其中某项时，视频仍继续正常播放。
+    tryFullscreen();
+
+    const p = v.play();
+    if (p && p.catch) {
+      p.catch(() => {
+        const resume = () => {
+          tryFullscreen();
+          v.play().catch(() => {});
+        };
+        $("scare").addEventListener("pointerdown", resume, { once: true });
+      });
+    }
+
+    v.removeEventListener("timeupdate", enforceScareAudio);
+    v.addEventListener("timeupdate", enforceScareAudio);
+    clearInterval(scareWatchdog);
+    scareWatchdog = setInterval(enforceScareAudio, 100);
+
+    v.onended = showDesktop;
+  }
+  function showDesktop() {
+    if (scareDone) return;
+    scareDone = true; inDesktop = true;
+    clearInterval(scareWatchdog);
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    } catch (_) {}
+    $("scare").classList.remove("show");
+    $("login").style.display = "none"; $("clockScreen").style.display = "none";
+    $("corner").style.display = "none"; $("bg").style.display = "none";
+    $("desktop").classList.add("show");
+  }
+
+  // ---------- 图标 ----------
+  const EMOJI = { text: "📄", image: "🖼️", video: "🎬", folder: "📁" };
+  function makeIcon(item) {
+    const el = document.createElement("div");
+    el.className = "icon";
+    el.innerHTML = `<div class="ico">${item.password ? "🔒" : EMOJI[item.type]}</div><div class="nm"></div>`;
+    el.querySelector(".nm").textContent = item.name;
+    el.addEventListener(OPEN_WITH_SINGLE_CLICK ? "click" : "dblclick", e => { e.stopPropagation(); openItem(item); });
+    return el;
+  }
+  DESKTOP.forEach(it => $("icons").appendChild(makeIcon(it)));
+
+  // ---------- 窗口管理 ----------
+  let zTop = 10, cascade = 0;
+  const wins = {};   // key -> {el, btn}
+
+  function createWindow(key, title, icon, w, h, bodyClass, bodyEl) {
+    if (wins[key]) { focusWin(key); return wins[key]; }
+    const el = document.createElement("div");
+    el.className = "win";
+    const maxW = innerWidth - 40, maxH = innerHeight - 100;
+    w = Math.min(w, maxW); h = Math.min(h, maxH);
+    el.style.width = w + "px"; el.style.height = h + "px";
+    el.style.left = Math.max(10, (innerWidth - w) / 2 + (cascade % 6) * 28 - 60) + "px";
+    el.style.top  = Math.max(10, (innerHeight - 48 - h) / 2 + (cascade % 6) * 28 - 60) + "px";
+    cascade++;
+    el.innerHTML = `<div class="wtitle"><span>${icon} ${title}</span>
+      <div class="wbtns"><span class="wmin">—</span><span class="wx">✕</span></div></div><div class="wbody ${bodyClass}"></div>`;
+    el.querySelector(".wbody").appendChild(bodyEl);
+    $("desktop").appendChild(el);
+
+    const btn = document.createElement("button");
+    btn.className = "tbBtn";
+    btn.textContent = icon + " " + title;
+    $("tbLeft").appendChild(btn);
+
+    wins[key] = { el, btn };
+    el.addEventListener("mousedown", () => focusWin(key));
+    el.querySelector(".wx").addEventListener("click", e => { e.stopPropagation(); closeWin(key); });
+    el.querySelector(".wmin").addEventListener("click", e => { e.stopPropagation(); minWin(key); });
+    btn.addEventListener("click", () => {
+      if (el.classList.contains("min") || !btn.classList.contains("active")) focusWin(key); else minWin(key);
+    });
+
+    // 拖动
+    const bar = el.querySelector(".wtitle");
+    bar.addEventListener("pointerdown", e => {
+      if (e.target.closest(".wbtns")) return;
+      const dx = e.clientX - el.offsetLeft, dy = e.clientY - el.offsetTop;
+      bar.setPointerCapture(e.pointerId);
+      const move = ev => {
+        el.style.left = Math.min(innerWidth - 80, Math.max(-w + 120, ev.clientX - dx)) + "px";
+        el.style.top  = Math.min(innerHeight - 90, Math.max(0, ev.clientY - dy)) + "px";
+      };
+      const up = () => { bar.removeEventListener("pointermove", move); bar.removeEventListener("pointerup", up); };
+      bar.addEventListener("pointermove", move); bar.addEventListener("pointerup", up);
+    });
+    focusWin(key);
+    return wins[key];
+  }
+  function focusWin(key) {
+    const w = wins[key]; if (!w) return;
+    w.el.classList.remove("min");
+    w.el.style.zIndex = ++zTop;
+    Object.values(wins).forEach(x => x.btn.classList.remove("active"));
+    w.btn.classList.add("active");
+  }
+  function minWin(key) { const w = wins[key]; w.el.classList.add("min"); w.btn.classList.remove("active"); }
+  function closeWin(key) { const w = wins[key]; if (!w) return; w.el.remove(); w.btn.remove(); delete wins[key]; }
+
+  // ---------- 打开文件 ----------
+  let uid = 0;
+  function openItem(item) {
+    if (!item._id) item._id = "i" + (++uid);
+    if (item.password && !item._unlocked) return askPassword(item);
+    const key = item._id;
+    if (item.type === "text") {
+      const d = document.createElement("div"); d.textContent = item.content;
+      createWindow(key, item.name, "📄", 540, 420, "text", d);
+    } else if (item.type === "image") {
+      const img = document.createElement("img"); img.src = item.src;
+      img.onerror = () => { img.replaceWith(Object.assign(document.createElement("div"), { textContent: "无法打开此图片。", style: "color:#fff" })); };
+      createWindow(key, item.name, "🖼️", 700, 500, "media", img);
+    } else if (item.type === "video") {
+      const v = document.createElement("video"); v.src = item.src; v.controls = true; v.autoplay = true;
+      createWindow(key, item.name, "🎬", 760, 480, "media", v);
+    } else if (item.type === "folder") {
+      const d = document.createElement("div"); d.style.display = "contents";
+      item.children.forEach(c => d.appendChild(makeIcon(c)));
+      createWindow(key, item.name, "📁", 520, 360, "folder", d);
+    }
+  }
+  function askPassword(item) {
+    const key = "ask_" + item._id;
+    const d = document.createElement("div"); d.style.cssText = "width:100%;display:flex;flex-direction:column;gap:12px;align-items:center";
+    d.innerHTML = `<div>此文件已加密，请输入密码</div><input type="password" spellcheck="false"><div class="msg"></div><button>确定</button>`;
+    const inp = d.querySelector("input"), msg = d.querySelector(".msg");
+    const ok = () => {
+      if (inp.value === item.password) { item._unlocked = true; closeWin(key); openItem(item); }
+      else { msg.textContent = "密码错误，请重试。"; inp.value = ""; inp.focus(); }
+    };
+    d.querySelector("button").addEventListener("click", ok);
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") ok(); });
+    createWindow(key, "需要密码", "🔒", 340, 230, "ask", d);
+    setTimeout(() => inp.focus(), 50);
+  }
+
+  // ---------- 工作人员退出 ----------
+  let finished = false;
+  function finish() {
+    if (finished) return; finished = true;
+    fetch("/done", { method: "POST" }).catch(() => {});
+    setTimeout(() => window.close(), 800);
+  }
+  document.addEventListener("keydown", e => { if (e.key === STAFF_KEY) finish(); });
+  document.addEventListener("contextmenu", e => e.preventDefault());
+</script>
+</body>
+</html>
